@@ -1,0 +1,389 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="TOPIK 背单词">
+    <meta name="theme-color" content="#f2f3f7">
+    <title>TOPIK 韩语背单词</title>
+    <link rel="stylesheet" href="static/style.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+    <!-- 防止深色模式闪烁：在 CSS 加载前读取设置 -->
+    <script>
+    (function(){
+        var dark;
+        try { dark = JSON.parse(localStorage.getItem('topik_settings')||'{}').dark_mode; } catch(e) {}
+        if (dark === '1') document.documentElement.setAttribute('data-theme','dark');
+        else document.documentElement.setAttribute('data-theme','light');
+    })();
+    </script>
+</head>
+<body>
+<div id="app">
+
+    <!-- ════════════════ Tab 1: 复习 ════════════════ -->
+    <section class="tab-page active" id="tab-review">
+        <!-- 顶部栏 -->
+        <header class="review-header">
+            <div class="rh-left">
+                <div class="header-date" id="headerDate">6月21日 周六</div>
+                <div class="header-sub-row">
+                    <span class="hs-item">已学 <strong id="hsReviewed">0</strong></span>
+                    <span class="hs-sep">·</span>
+                    <span class="hs-item">新词 <strong id="hsNew">0</strong></span>
+                    <span class="mode-badge" id="modeBadge" style="display:none"></span>
+                </div>
+            </div>
+            <div class="progress-ring-wrap">
+                <svg viewBox="0 0 100 100" class="progress-ring">
+                    <circle cx="50" cy="50" r="42" class="ring-bg"/>
+                    <circle cx="50" cy="50" r="42" class="ring-fill" id="ringFill"/>
+                </svg>
+                <div class="ring-text"><span class="ring-pct" id="ringPct">0%</span></div>
+            </div>
+        </header>
+
+        <!-- 卡片区域 -->
+        <main class="card-area">
+            <!-- 引导页 -->
+            <div class="guide-overlay" id="guideOverlay">
+                <div class="guide-content">
+                    <div class="guide-icon">📚</div>
+                    <h2>TOPIK 韩语背单词</h2>
+                    <p class="guide-desc">1026 词 · 20 单元 · 初级+中级<br>基于 SM-2 间隔重复算法</p>
+                    <div class="guide-steps">
+                        <div class="guide-step"><span class="gs-num">1</span> 看单词，回想释义</div>
+                        <div class="guide-step"><span class="gs-num">2</span> 点击卡片翻转查看答案</div>
+                        <div class="guide-step"><span class="gs-num">3</span> 诚实选择 认识 / 模糊 / 忘记</div>
+                    </div>
+                    <button class="guide-btn" id="guideBtn">开始学习</button>
+                </div>
+            </div>
+
+            <!-- 完成面板 -->
+            <div class="done-panel" id="donePanel">
+                <div class="done-icon">🎉</div>
+                <h2 id="doneTitle">今日目标完成！</h2>
+                <p class="done-detail" id="doneDetail"></p>
+                <div class="done-actions">
+                    <button class="da-btn da-continue" onclick="continueStudy()">📖 继续学习</button>
+                    <button class="da-btn da-review" onclick="reviewMistakes()" id="btnMistakes">🔄 复习错题 (<span id="mistakeCount">0</span>)</button>
+                    <button class="da-btn da-checkin" onclick="doCheckin()" id="btnCheckin">✅ 签到打卡</button>
+                </div>
+                <p class="done-sub">每日目标是建议量，想学就继续学 📚</p>
+            </div>
+
+            <!-- 签到成功 -->
+            <div class="done-panel" id="checkinPanel">
+                <div class="done-icon">✅</div>
+                <h2>签到成功！</h2>
+                <p style="font-size:28px;font-weight:800;color:var(--warning);margin:8px 0">
+                    🔥 <span id="checkinStreak">0</span> 天
+                </p>
+                <p style="color:var(--sub);font-size:14px">连续签到</p>
+                <button class="da-btn da-continue" onclick="closeCheckin()" style="margin-top:12px">继续加油</button>
+            </div>
+
+            <!-- 单词卡片 -->
+            <div class="word-card" id="wordCard">
+                <div class="card-inner" id="cardInner">
+                    <!-- 正面 -->
+                    <div class="card-front">
+                        <span class="card-tag" id="cardTag">TOPIK</span>
+                        <div class="card-main-text" id="cardMainText"></div>
+                        <div class="card-hint">点击翻转查看释义</div>
+                        <button class="card-tts-btn" id="cardTtsBtn" title="发音" onclick="event.stopPropagation();speakWord()">
+                            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 5L6 9H2v6h4l5 4V5z"/><path d="M19.07 4.93a10 10 0 010 14.14M15.54 8.46a5 5 0 010 7.07"/></svg>
+                        </button>
+                    </div>
+                    <!-- 背面 -->
+                    <div class="card-back">
+                        <div class="back-korean" id="backKorean"></div>
+                        <div class="back-meaning" id="backMeaning"></div>
+                        <div class="back-divider"></div>
+                        <div class="back-examples" id="backExamples"></div>
+                        <div class="back-note" id="backNote" style="display:none">
+                            <span class="note-icon">💡</span>
+                            <span class="note-text" id="noteText"></span>
+                        </div>
+                        <div class="back-mnemonic" id="backMnemonic">
+                            <div class="mn-header">
+                                <span class="mn-label">📝 我的助记</span>
+                                <button class="mn-edit-btn" id="mnEditBtn" onclick="event.stopPropagation();editMnemonic()">✎</button>
+                            </div>
+                            <div class="mn-content" id="mnContent">暂无笔记，点击 ✎ 添加</div>
+                            <div class="mn-editor" id="mnEditor" style="display:none">
+                                <textarea id="mnTextarea" placeholder="输入你的助记..."></textarea>
+                                <div class="mn-editor-actions">
+                                    <button onclick="event.stopPropagation();cancelMnemonic()">取消</button>
+                                    <button class="mn-save" onclick="event.stopPropagation();saveMnemonic()">保存</button>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="back-edit-section" id="backEditSection" style="display:none">
+                            <input type="text" id="editInput" placeholder="修正释义...">
+                            <button onclick="event.stopPropagation();saveMeaning()">✓</button>
+                        </div>
+                        <div class="back-meta">
+                            <span id="backReviewCount">复习 0 次</span>
+                            <span id="backLevel">Lv 0</span>
+                            <button class="back-edit-meaning-btn" onclick="event.stopPropagation();editMeaning(event)" title="修正释义">✎ 修正</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </main>
+
+        <!-- 评分按钮 -->
+        <div class="review-buttons" id="reviewButtons">
+            <button class="rb-btn rb-forgot" onclick="review(0)">
+                <span class="rb-emotion">😰</span>
+                <span class="rb-label">忘记</span>
+                <span class="rb-key">1</span>
+            </button>
+            <button class="rb-btn rb-fuzzy" onclick="review(1)">
+                <span class="rb-emotion">🤔</span>
+                <span class="rb-label">模糊</span>
+                <span class="rb-key">2</span>
+            </button>
+            <button class="rb-btn rb-known" onclick="review(2)">
+                <span class="rb-emotion">😊</span>
+                <span class="rb-label">认识</span>
+                <span class="rb-key">3</span>
+            </button>
+        </div>
+        <div class="key-hints">键盘 <kbd>1</kbd><kbd>2</kbd><kbd>3</kbd> 评分 · <kbd>Space</kbd> 翻转</div>
+
+        <!-- 手势球 -->
+        <div class="gesture-ball" id="gestureBall" style="display:none">
+            <div class="gb-main">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="3"/></svg>
+            </div>
+            <div class="gb-menu" id="gbMenu" style="display:none">
+                <button class="gb-item" onclick="event.stopPropagation();gestureBallAction('speak')">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 5L6 9H2v6h4l5 4V5z"/><path d="M19.07 4.93a10 10 0 010 14.14"/></svg>
+                </button>
+                <button class="gb-item" onclick="event.stopPropagation();gestureBallAction('flip')">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 014-4h14"/><polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 01-4 4H3"/></svg>
+                </button>
+                <button class="gb-item" onclick="event.stopPropagation();gestureBallAction('known')">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
+                </button>
+            </div>
+        </div>
+    </section>
+
+    <!-- ════════════════ Tab 2: 选词 ════════════════ -->
+    <section class="tab-page" id="tab-words">
+        <header class="page-header">
+            <h2>选词</h2>
+            <span class="ph-sub" id="wordsTotalCount">1026 词</span>
+        </header>
+        <div class="words-search">
+            <svg class="ws-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--hint)" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+            <input type="text" id="wordsSearchInput" placeholder="搜索韩语或中文...">
+        </div>
+        <div class="book-sections" id="bookSections"><div class="loading-text">加载中...</div></div>
+        <div class="unit-list-summary" id="unitListSummary"></div>
+    </section>
+
+    <!-- ════════════════ Tab 3: 统计 ════════════════ -->
+    <section class="tab-page" id="tab-stats">
+        <header class="page-header">
+            <h2>统计</h2>
+        </header>
+        <div class="stats-content">
+            <!-- 连续签到 -->
+            <div class="stats-card streak-card">
+                <div class="streak-fire">🔥</div>
+                <div class="streak-num" id="streakNum">0</div>
+                <div class="streak-label">天连续签到</div>
+            </div>
+
+            <!-- 今日摘要 -->
+            <div class="stats-card">
+                <div class="today-summary">
+                    <div class="ts-item"><span class="ts-val" id="stReviewed">0</span><span class="ts-lbl">已复习</span></div>
+                    <div class="ts-div"></div>
+                    <div class="ts-item"><span class="ts-val" id="stNew">0</span><span class="ts-lbl">新学</span></div>
+                    <div class="ts-div"></div>
+                    <div class="ts-item"><span class="ts-val" id="stAccuracy">0%</span><span class="ts-lbl">正确率</span></div>
+                </div>
+            </div>
+
+            <!-- 遗忘曲线 -->
+            <div class="stats-card chart-card">
+                <div class="chart-header">
+                    <h3>遗忘曲线</h3>
+                    <span class="chart-sub">记忆保持率变化</span>
+                </div>
+                <div class="chart-wrap"><canvas id="forgettingCurveChart"></canvas></div>
+                <p class="chart-note" id="forgettingNote"></p>
+            </div>
+
+            <!-- 学习情况 -->
+            <div class="stats-card chart-card">
+                <div class="chart-header">
+                    <h3>学习情况</h3>
+                    <span class="chart-sub">近30天复习 + 未来7天预测</span>
+                </div>
+                <div class="chart-wrap"><canvas id="learningStatusChart"></canvas></div>
+            </div>
+
+            <!-- 记忆持久度 -->
+            <div class="stats-card chart-card">
+                <div class="chart-header">
+                    <h3>记忆持久度</h3>
+                    <span class="chart-sub">单词掌握等级分布</span>
+                </div>
+                <div class="chart-wrap"><canvas id="masteryDistChart"></canvas></div>
+            </div>
+
+            <!-- 学习总览 -->
+            <div class="stats-card">
+                <h3 style="font-size:14px;color:var(--sub);margin-bottom:12px;font-weight:500">学习总览</h3>
+                <div class="overview-grid">
+                    <div class="og-item"><span class="og-val" id="stTotal">1026</span><span class="og-lbl">总词数</span></div>
+                    <div class="og-item"><span class="og-val" id="stLearned">0</span><span class="og-lbl">学习中</span></div>
+                    <div class="og-item"><span class="og-val" id="stMastered">0</span><span class="og-lbl">已掌握</span></div>
+                    <div class="og-item"><span class="og-val" id="stUnlearned">0</span><span class="og-lbl">未学习</span></div>
+                </div>
+            </div>
+
+            <!-- 签到日历 -->
+            <div class="stats-card">
+                <h3 style="font-size:14px;color:var(--sub);margin-bottom:12px;font-weight:500">签到日历</h3>
+                <div class="calendar" id="checkinCalendar"></div>
+            </div>
+        </div>
+    </section>
+
+    <!-- ════════════════ Tab 4: 设置 ════════════════ -->
+    <section class="tab-page" id="tab-settings">
+        <header class="page-header">
+            <h2>设置</h2>
+        </header>
+        <div class="settings-content">
+            <!-- 每日学习量 -->
+            <div class="setting-group">
+                <div class="sg-header">
+                    <span class="sg-label">每日学习量</span>
+                    <span class="sg-value" id="setDailyGoalLabel">50</span>
+                </div>
+                <input type="range" min="0" max="500" step="10" value="50" id="setDailyGoal" onchange="updateDailyGoal(this.value)">
+                <div class="sg-range-labels"><span>不限</span><span>100</span><span>300</span><span>500</span></div>
+                <p class="sg-desc">0 = 不限。每日学习总量 = 复习词 + 新词</p>
+            </div>
+
+            <!-- 记忆模式 -->
+            <div class="setting-group">
+                <div class="sg-header">
+                    <span class="sg-label">记忆模式</span>
+                </div>
+                <div class="sg-toggle-row" id="memoryModeToggle">
+                    <button class="st-btn active" data-value="ko2cn" onclick="setMemoryMode('ko2cn', this)">韩 → 中</button>
+                    <button class="st-btn" data-value="cn2ko" onclick="setMemoryMode('cn2ko', this)">中 → 韩</button>
+                </div>
+                <p class="sg-desc">选择单词卡片的正面显示语言</p>
+            </div>
+
+            <!-- 学习单元 -->
+            <div class="setting-group">
+                <div class="sg-header">
+                    <span class="sg-label">学习单元</span>
+                    <button class="text-link" onclick="selectAllUnits()">全选</button>
+                    <button class="text-link" onclick="deselectAllUnits()">取消</button>
+                </div>
+                <div class="book-unit-sections" id="settingsBookSections"></div>
+            </div>
+
+            <!-- 深色模式 -->
+            <div class="setting-group">
+                <div class="sg-row">
+                    <div>
+                        <span class="sg-label">深色模式</span>
+                        <p class="sg-desc" style="margin-top:2px">切换暗色主题，护眼更舒适</p>
+                    </div>
+                    <label class="switch">
+                        <input type="checkbox" id="darkModeToggle" onchange="toggleDarkMode(this.checked)">
+                        <span class="slider"></span>
+                    </label>
+                </div>
+            </div>
+
+            <!-- 发音 -->
+            <div class="setting-group">
+                <div class="sg-row">
+                    <div>
+                        <span class="sg-label">自动发音</span>
+                        <p class="sg-desc" style="margin-top:2px">显示单词时自动朗读</p>
+                    </div>
+                    <label class="switch">
+                        <input type="checkbox" id="ttsToggle" onchange="updateTtsSetting(this.checked)">
+                        <span class="slider"></span>
+                    </label>
+                </div>
+                <div class="sg-header" style="margin-top:14px">
+                    <span class="sg-label">发音速度</span>
+                    <span class="sg-value" id="speedLabel">1.0x</span>
+                </div>
+                <input type="range" min="0.5" max="2.0" step="0.1" value="1.0" id="speedSlider" onchange="updateSpeed(this.value)">
+                <div class="sg-range-labels"><span>0.5x</span><span>1.0x</span><span>1.5x</span><span>2.0x</span></div>
+            </div>
+
+            <!-- 手势球 -->
+            <div class="setting-group">
+                <div class="sg-row">
+                    <div>
+                        <span class="sg-label">手势球</span>
+                        <p class="sg-desc" style="margin-top:2px">悬浮快捷操作按钮</p>
+                    </div>
+                    <label class="switch">
+                        <input type="checkbox" id="gestureBallToggle" onchange="toggleGestureBall(this.checked)">
+                        <span class="slider"></span>
+                    </label>
+                </div>
+            </div>
+
+            <!-- 重置 -->
+            <div class="setting-group danger-group">
+                <button class="danger-btn" onclick="resetProgress()">重置学习进度</button>
+                <p class="sg-desc" style="text-align:center;margin-top:8px">此操作不可撤销，仅重置进度不删除单词</p>
+            </div>
+
+            <!-- 关于 -->
+            <div class="about-info">
+                <p>TOPIK 韩语背单词 v4.0</p>
+                <p>1026 词 · 20 单元 · SM-2 间隔重复</p>
+                <p style="margin-top:4px;color:var(--hint)">墨墨背单词深度还原 · Chart.js · Web Speech API</p>
+            </div>
+        </div>
+    </section>
+
+    <!-- ════════════════ 底部导航 ════════════════ -->
+    <nav class="bottom-nav">
+        <button class="bn-item active" data-tab="review" onclick="switchTab('review')">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3h6a4 4 0 014 4v14a3 3 0 00-3-3H2z"/><path d="M22 3h-6a4 4 0 00-4 4v14a3 3 0 013-3h7z"/></svg>
+            <span>复习</span>
+        </button>
+        <button class="bn-item" data-tab="words" onclick="switchTab('words')">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>
+            <span>选词</span>
+        </button>
+        <button class="bn-item" data-tab="stats" onclick="switchTab('stats')">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
+            <span>统计</span>
+        </button>
+        <button class="bn-item" data-tab="settings" onclick="switchTab('settings')">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg>
+            <span>设置</span>
+        </button>
+    </nav>
+</div>
+
+<script src="static/words_data.js"></script>
+<script src="static/script.js"></script>
+</body>
+</html>
