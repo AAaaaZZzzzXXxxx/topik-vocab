@@ -36,15 +36,19 @@
 
 ---
 
-## 使用
+## 本地运行
+
+下载项目后用任意 HTTP 服务打开 `index.html` 即可（直接双击打开不行，浏览器会阻止 localStorage）。
 
 ```bash
-git clone https://github.com/<你的用户名>/<仓库名>.git
-cd <仓库名>
-npx serve .        # 或 python -m http.server 8080
+# 方式一：用 Python（macOS/Windows 自带）
+python -m http.server 8080
+
+# 方式二：用 VS Code Live Server 插件
+# 右键 index.html → Open with Live Server
 ```
 
-浏览器打开 `http://localhost:3000`。
+然后浏览器打开 `http://localhost:8080`。
 
 ## GitHub Pages 部署
 

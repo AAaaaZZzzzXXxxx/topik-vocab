@@ -105,13 +105,16 @@ function getDueWords(limit = 30) {
     const todayStats = dailyStats[today] || {};
     const todayReviewed = todayStats.reviewedWords || 0;
 
+    // Cache progress to avoid repeated JSON.parse (2931 words × parsing full object = slow on mobile)
+    const progressCache = lsGet(LS.progress);
+
     // Score each word
     const candidates = [];
     for (const w of TOPIK_WORDS) {
         if (!includeLoanwords && w.is_loanword) continue;
         if (!selectedUnits.has(w.unit)) continue;
 
-        const p = getProgress(w.id);
+        const p = progressCache[w.id] || { level: 0, easeFactor: 2.5, intervalDays: 0, nextReview: today, totalReviews: 0, totalCorrect: 0, lastResult: 0, lastReviewed: null, lastForgotDate: null, streakCorrect: 0 };
 
         if (currentMode === 'mistakes') {
             if (p.lastReviewed === today && p.lastResult !== undefined && p.lastResult < 2) {
