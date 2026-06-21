@@ -167,15 +167,16 @@ function getDueWords(limit = 30) {
 
 function getSelectedUnitSet() {
     const settings = getSettings();
-    const scope = settings.study_scope || 'all';
-    if (scope === 'beginner') {
-        return new Set(TOPIK_WORDS.filter(w => w.unit.startsWith('初级')).map(w => w.unit));
+    const scopes = (settings.study_scopes || 'beginner,intermediate,advanced').split(',').filter(Boolean);
+    const prefixes = { beginner: '初级', intermediate: '中级', advanced: '高级' };
+    const result = new Set();
+    for (const scope of scopes) {
+        const prefix = prefixes[scope];
+        if (prefix) {
+            TOPIK_WORDS.filter(w => w.unit.startsWith(prefix)).forEach(w => result.add(w.unit));
+        }
     }
-    if (scope === 'intermediate') {
-        return new Set(TOPIK_WORDS.filter(w => w.unit.startsWith('中级')).map(w => w.unit));
-    }
-    // scope === 'all' → all units
-    return new Set(TOPIK_WORDS.map(w => w.unit));
+    return result.size > 0 ? result : new Set(TOPIK_WORDS.map(w => w.unit));
 }
 
 function getTodayMistakeCount() {
@@ -209,12 +210,12 @@ function getUnitProgress(unitName) {
 
 function getAllUnitsWithProgress() {
     const units = [...new Set(TOPIK_WORDS.map(w => w.unit))].sort();
-    const books = { '初级': [], '中级': [] };
+    const books = { '初级': [], '中级': [], '高级': [] };
     for (const unit of units) {
-        const book = unit.startsWith('中级') ? '中级' : '初级';
+        const book = unit.startsWith('高级') ? '高级' : unit.startsWith('中级') ? '中级' : '初级';
         const num = parseInt((unit.match(/\d+/) || ['0'])[0]);
         const progress = getUnitProgress(unit);
-        books[book].push({ name: unit, shortName: unit.replace(/^(初级|中级) /, ''), num, ...progress });
+        books[book].push({ name: unit, shortName: unit.replace(/^(初级|中级|高级) /, ''), num, ...progress });
     }
     for (const b of Object.keys(books)) books[b].sort((a, b) => a.num - b.num);
     return books;
@@ -1063,7 +1064,7 @@ function renderUnitListView() {
     $('wordsTotalCount').textContent = totalWords + ' 词';
 
     let html = '';
-    for (const bookName of ['初级', '中级']) {
+    for (const bookName of ['初级', '中级', '高级']) {
         const units = books[bookName];
         if (!units.length) continue;
         const bookLearned = units.reduce((s, u) => s + u.learned, 0);
@@ -1104,7 +1105,7 @@ function openUnitDetail(unitName) {
         words = words.filter(w => favIds.includes(String(w.id)));
     }
     const progress = getUnitProgress(unitName);
-    const shortName = unitName.replace(/^(初级|中级) /, '');
+    const shortName = unitName.replace(/^(初级|中级|高级) /, '');
 
     $('udTitle').textContent = shortName;
     $('udStatsBar').innerHTML = `<span>📚 ${progress.total} 词</span><span>✅ 已学 ${progress.learned}</span><span>⭐ 掌握 ${progress.mastered}</span>${progress.accuracy > 0 ? `<span>🎯 正确率 ${progress.accuracy}%</span>` : ''}`;
@@ -1184,9 +1185,10 @@ window.startAllQuickReview = function() {
     $('unitDetailView').style.display = 'none';
     $('quickReviewArea').style.display = 'flex';
 
-    const scope = (getSettings().study_scope || 'all');
-    const scopeLabel = { all: '全部单词', beginner: '初级', intermediate: '中级' };
-    $('qrTitle').textContent = (scopeLabel[scope] || '学习范围') + ' · ' + words.length + '词';
+    const scopes = (getSettings().study_scopes || 'beginner,intermediate,advanced').split(',').filter(Boolean);
+    const scopeLabel = { beginner: '初级', intermediate: '中级', advanced: '高级' };
+    const scopeName = scopes.length === 3 ? '全部单词' : scopes.map(s => scopeLabel[s] || s).join('+');
+    $('qrTitle').textContent = scopeName + ' · ' + words.length + '词';
 
     renderQuickReviewWord();
 };
@@ -1379,9 +1381,11 @@ function initSettingsPage() {
     $('ttsToggle').checked = s.tts_enabled !== '0';
     $('speedSlider').value = parseFloat(s.pronunciation_speed || '1.0');
     $('speedLabel').textContent = parseFloat(s.pronunciation_speed || '1.0').toFixed(1) + 'x';
-    // Study scope toggle
-    const scope = s.study_scope || 'all';
-    document.querySelectorAll('#studyScopeToggle .st-btn').forEach(b => b.classList.toggle('active', b.dataset.value === scope));
+    // Study scope toggle (multi-select)
+    const scopes = (s.study_scopes || 'beginner,intermediate,advanced').split(',').filter(Boolean);
+    document.querySelectorAll('#studyScopeToggle .st-btn').forEach(b => {
+        b.classList.toggle('active', scopes.includes(b.dataset.value));
+    });
     // Voice selector
     renderVoiceSelector();
 }
@@ -1405,13 +1409,22 @@ window.toggleDarkMode = function(enabled) {
 };
 window.updateTtsSetting = function(enabled) { appSettings.tts_enabled = enabled ? '1' : '0'; saveSettings({ tts_enabled: enabled ? '1' : '0' }); };
 window.updateSpeed = function(v) { $('speedLabel').textContent = parseFloat(v).toFixed(1) + 'x'; appSettings.pronunciation_speed = v; saveSettings({ pronunciation_speed: v }); };
-// ─── Study Scope ────────────────────────────────────────────────
-window.setStudyScope = function(scope, btn) {
-    document.querySelectorAll('#studyScopeToggle .st-btn').forEach(b => b.classList.remove('active'));
-    btn.classList.add('active');
-    saveSettings({ study_scope: scope });
-    const labels = { all: '全部单词', beginner: '仅初级', intermediate: '仅中级' };
-    showToast('学习范围：' + (labels[scope] || scope));
+// ─── Study Scope (multi-select toggle) ──────────────────────────
+window.toggleStudyScope = function(scope, btn) {
+    const s = getSettings();
+    let scopes = (s.study_scopes || 'beginner,intermediate,advanced').split(',').filter(Boolean);
+    if (scopes.includes(scope)) {
+        if (scopes.length <= 1) { showToast('至少保留一个级别'); return; }
+        scopes = scopes.filter(x => x !== scope);
+        btn.classList.remove('active');
+    } else {
+        scopes.push(scope);
+        btn.classList.add('active');
+    }
+    saveSettings({ study_scopes: scopes.join(',') });
+    const labels = { beginner: '初级', intermediate: '中级', advanced: '高级' };
+    const names = scopes.map(s => labels[s] || s).join('+');
+    showToast('学习范围：' + names);
 };
 
 // ─── Data Backup ───────────────────────────────────────────────
