@@ -1,6 +1,6 @@
 // ═══════════════════════════════════════════════════════════════
 // TOPIK 韩语背单词 v5.0 — 纯静态版 (GitHub Pages)
-// localStorage 持久化 · SM-2 算法 · Chart.js · TTS · 手势球
+// localStorage 持久化 · SM-2 算法 · Chart.js · TTS
 // ═══════════════════════════════════════════════════════════════
 
 const $ = id => document.getElementById(id);
@@ -18,6 +18,11 @@ let currentBrowseUnit = null;
 let quickReviewWords = [];
 let quickReviewIndex = 0;
 let qrIsFlipped = false;
+let favFilterOn = false;
+
+// ─── Undo State ───────────────────────────────────────────────
+let lastReviewUndo = null;
+let undoTimer = null;
 
 // ─── localStorage Keys ────────────────────────────────────────
 const LS = {
@@ -26,6 +31,7 @@ const LS = {
     checkins: 'topik_checkins',
     settings: 'topik_settings',
     mnemonics: 'topik_mnemonics',
+    favorites: 'topik_favorites',
 };
 
 function lsGet(key) {
@@ -103,7 +109,7 @@ function getDueWords(limit = 30) {
     const candidates = [];
     for (const w of TOPIK_WORDS) {
         if (!includeLoanwords && w.is_loanword) continue;
-        if (selectedUnits.size > 0 && selectedUnits.size < 40 && !selectedUnits.has(w.unit)) continue;
+        if (!selectedUnits.has(w.unit)) continue;
 
         const p = getProgress(w.id);
 
@@ -127,16 +133,28 @@ function getDueWords(limit = 30) {
     // Sort: reviews first, then new words
     candidates.sort((a, b) => a.priority - b.priority);
 
+    // Shuffle new words for interleaved unit learning
+    const reviewWords = candidates.filter(c => c.priority === 0);
+    let newWords = candidates.filter(c => c.priority === 1);
+    // Fisher-Yates shuffle on new words
+    for (let i = newWords.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [newWords[i], newWords[j]] = [newWords[j], newWords[i]];
+    }
+
     // Apply daily goal in normal mode
     if (currentMode === 'normal' && dailyGoal > 0) {
         const result = [];
         let reviewSlots = dailyGoal - todayReviewed;
-        for (const c of candidates) {
+        // Reviews first (overdue)
+        for (const c of reviewWords) {
             if (result.length >= limit) break;
-            if (c.priority === 0) {
-                // Reviews bypass the daily goal (must review overdue words)
-                result.push(c);
-            } else if (reviewSlots > 0) {
+            result.push(c);
+        }
+        // New words limited by daily goal (shuffled)
+        for (const c of newWords) {
+            if (result.length >= limit) break;
+            if (reviewSlots > 0) {
                 result.push(c);
                 reviewSlots--;
             }
@@ -144,7 +162,7 @@ function getDueWords(limit = 30) {
         return result;
     }
 
-    return candidates.slice(0, limit);
+    return [...reviewWords, ...newWords].slice(0, limit);
 }
 
 function getSelectedUnitSet() {
@@ -318,7 +336,7 @@ function getMasteryDistributionData() {
 
 // ─── Settings ─────────────────────────────────────────────────
 function getSettings() {
-    const defaults = { daily_goal: '50', selected_units: '*', dark_mode: '0', memory_mode: 'ko2cn', gesture_ball: '1', pronunciation_speed: '1.0', tts_enabled: '1' };
+    const defaults = { daily_goal: '50', selected_units: '*', dark_mode: '0', memory_mode: 'ko2cn', pronunciation_speed: '1.0', tts_enabled: '1' };
     return { ...defaults, ...lsGet(LS.settings) };
 }
 
@@ -357,13 +375,42 @@ function setLocalMnemonic(wordId, content) {
     lsSet(LS.mnemonics, all);
 }
 
+// ─── Favorites ─────────────────────────────────────────────────
+function isFavorite(wordId) { return !!(lsGet('topik_favorites')[wordId]); }
+function toggleFavorite(wordId) {
+    const favs = lsGet('topik_favorites');
+    if (favs[wordId]) delete favs[wordId];
+    else favs[wordId] = true;
+    lsSet('topik_favorites', favs);
+    return !!favs[wordId]; // true if now favorited
+}
+window.toggleStar = function() {
+    if (!currentWord) return;
+    const nowFav = toggleFavorite(currentWord.id);
+    $('starBtn').textContent = nowFav ? '⭐' : '☆';
+    if (nowFav) $('starBtn').classList.add('faved'); else $('starBtn').classList.remove('faved');
+    showToast(nowFav ? '已收藏 ⭐' : '已取消收藏');
+};
+window.qrToggleStar = function() {
+    if (quickReviewWords.length === 0) return;
+    const w = quickReviewWords[quickReviewIndex];
+    const nowFav = toggleFavorite(w.id);
+    $('qrStarBtn').textContent = nowFav ? '⭐' : '☆';
+    if (nowFav) $('qrStarBtn').classList.add('faved'); else $('qrStarBtn').classList.remove('faved');
+    showToast(nowFav ? '已收藏 ⭐' : '已取消收藏');
+};
+function updateStarButton(wordId) {
+    const fav = isFavorite(wordId);
+    if ($('starBtn')) { $('starBtn').textContent = fav ? '⭐' : '☆'; if (fav) $('starBtn').classList.add('faved'); else $('starBtn').classList.remove('faved'); }
+    if ($('qrStarBtn')) { $('qrStarBtn').textContent = fav ? '⭐' : '☆'; if (fav) $('qrStarBtn').classList.add('faved'); else $('qrStarBtn').classList.remove('faved'); }
+}
+
 // ═══════════════════════════════════════════════════════════════
 // Init
 // ═══════════════════════════════════════════════════════════════
 document.addEventListener('DOMContentLoaded', async () => {
     appSettings = getSettings();
     applyTheme();
-    initGestureBall();
     setupKeyboard();
 
     if (localStorage.getItem('topik_guided_v5')) {
@@ -403,7 +450,6 @@ window.switchTab = function(tab) {
     }
     if (tab === 'settings') initSettingsPage();
     if (tab === 'review') initDateHeader();
-    updateGestureBallVisibility();
 };
 
 // ═══════════════════════════════════════════════════════════════
@@ -483,6 +529,8 @@ async function loadNextWord(mode) {
     $('modeBadge').style.display = mode !== 'normal' ? 'inline-block' : 'none';
     $('modeBadge').textContent = mode === 'continue' ? '加量' : mode === 'mistakes' ? '错题' : '';
 
+    updateStarButton(w.id);
+
     if (appSettings.tts_enabled !== '0' && w.korean) speak(w.korean, 'ko-KR');
 
     isAnimating = false;
@@ -513,6 +561,17 @@ window.review = function(result) {
     const srs = calcSRS(oldP.level, oldP.easeFactor, oldP.intervalDays, result);
     const isNewGraduated = prevLevel === 0 && srs.level > 0;
 
+    // Save undo snapshot before mutating
+    const today = todayISO();
+    const oldStatsSnapshot = JSON.stringify(lsGet(LS.dailyStats));
+    lastReviewUndo = {
+        wordId: currentWord.id,
+        oldProgress: { ...oldP },
+        oldStatsSnapshot,
+        wasNewGraduated: isNewGraduated,
+        result: result,
+    };
+
     const newP = {
         ...oldP,
         level: srs.level,
@@ -522,8 +581,8 @@ window.review = function(result) {
         totalReviews: (oldP.totalReviews || 0) + 1,
         totalCorrect: (oldP.totalCorrect || 0) + (result === 2 ? 1 : 0),
         lastResult: result,
-        lastReviewed: todayISO(),
-        lastForgotDate: result === 0 ? todayISO() : oldP.lastForgotDate,
+        lastReviewed: today,
+        lastForgotDate: result === 0 ? today : oldP.lastForgotDate,
         streakCorrect: result === 2 ? (oldP.streakCorrect || 0) + 1 : 0,
     };
     setProgress(currentWord.id, newP);
@@ -532,7 +591,54 @@ window.review = function(result) {
     loadStats();
     isAnimating = false;
     currentWord = null;
+    showUndoButton();
     loadNextWord(currentMode);
+};
+
+// ─── Undo ───────────────────────────────────────────────────────
+function showUndoButton() {
+    const toast = $('undoToast');
+    if (!toast) return;
+    if (undoTimer) clearTimeout(undoTimer);
+    toast.classList.add('show');
+    undoTimer = setTimeout(() => {
+        toast.classList.remove('show');
+        lastReviewUndo = null;
+    }, 3000);
+}
+window.undoReview = function() {
+    if (!lastReviewUndo) return;
+    const u = lastReviewUndo;
+    // Restore progress
+    setProgress(u.wordId, u.oldProgress);
+    // Restore daily stats
+    lsSet(LS.dailyStats, JSON.parse(u.oldStatsSnapshot));
+    // Clean up
+    lastReviewUndo = null;
+    if (undoTimer) clearTimeout(undoTimer);
+    $('undoToast').classList.remove('show');
+    // Reload the undone word
+    currentMode = 'normal';
+    isFlipped = false;
+    loadStats();
+    // Find the word and show it
+    const w = TOPIK_WORDS.find(x => x.id === u.wordId);
+    if (w) {
+        currentWord = w;
+        const $card = $('wordCard');
+        $card.style.display = 'block';
+        $('cardInner').classList.remove('flipped');
+        $('donePanel').classList.remove('show');
+        $('reviewButtons').style.display = '';
+        // Re-render card front
+        const memMode = appSettings.memory_mode || 'ko2cn';
+        $('cardMainText').textContent = memMode === 'cn2ko' ? w.meaning : w.korean;
+        $('cardTag').textContent = w.unit || 'TOPIK';
+        cardShownAt = performance.now();
+        updateStarButton(w.id);
+        if (appSettings.tts_enabled !== '0' && w.korean) speak(w.korean, 'ko-KR');
+    }
+    showToast('已撤销 ↩');
 };
 
 // ─── Done / Checkin ───────────────────────────────────────────
@@ -540,19 +646,97 @@ function showDonePanel() {
     $('wordCard').style.display = 'none';
     $('reviewButtons').style.display = 'none';
     $('donePanel').classList.add('show');
+    $('undoToast').classList.remove('show');
     todayStatsCache = getTodayStats();
     $('doneDetail').innerHTML = '今日复习 <strong>' + (todayStatsCache.reviewedWords || 0) + '</strong> 词 · 新学 <strong>' + (todayStatsCache.newWords || 0) + '</strong> 词<br>认识 ' + (todayStatsCache.knownCount || 0) + ' · 模糊 ' + (todayStatsCache.fuzzyCount || 0) + ' · 忘记 ' + (todayStatsCache.forgotCount || 0);
     $('ringPct').textContent = '100%';
     const circ = 2 * Math.PI * 42;
     $('ringFill').setAttribute('stroke-dasharray', `${circ} ${circ}`);
     $('ringFill').setAttribute('stroke-dashoffset', '0');
+    // Show today review button if there are words reviewed
+    const reviewed = todayStatsCache.reviewedWords || 0;
+    $('btnTodayReview').style.display = reviewed > 0 ? '' : 'none';
+    $('todayReviewList').style.display = 'none';
+    lastReviewUndo = null;
+    if (undoTimer) clearTimeout(undoTimer);
+    $('undoToast').classList.remove('show');
 }
 
 function resetDonePanels() {
     $('donePanel').classList.remove('show');
     $('checkinPanel').classList.remove('show');
     $('doneTitle').textContent = '今日目标完成！';
+    $('todayReviewList').style.display = 'none';
+    // Note: do NOT hide undo toast here — it has its own 3s timer
 }
+
+// ─── Today Review ──────────────────────────────────────────────
+function getTodayReviewWords() {
+    const today = todayISO();
+    const progress = lsGet(LS.progress);
+    const words = [];
+    for (const w of TOPIK_WORDS) {
+        const p = progress[w.id];
+        if (p && p.lastReviewed === today) {
+            words.push({ ...w, lastResult: p.lastResult });
+        }
+    }
+    // Most recent first
+    return words.reverse();
+}
+// ─── Manual "Today" panel access from review header ──────────
+window.showTodayPanel = function() {
+    stopSpeech();
+    isAnimating = false;
+    currentWord = null;
+    $('wordCard').style.display = 'none';
+    $('reviewButtons').style.display = 'none';
+    $('cardInner').classList.remove('flipped');
+    isFlipped = false;
+    $('undoToast').classList.remove('show');
+    if (undoTimer) clearTimeout(undoTimer);
+    lastReviewUndo = null;
+    // Show done panel with today's data
+    todayStatsCache = getTodayStats();
+    const reviewed = todayStatsCache.reviewedWords || 0;
+    $('doneDetail').innerHTML = '今日复习 <strong>' + reviewed + '</strong> 词 · 新学 <strong>' + (todayStatsCache.newWords || 0) + '</strong> 词<br>认识 ' + (todayStatsCache.knownCount || 0) + ' · 模糊 ' + (todayStatsCache.fuzzyCount || 0) + ' · 忘记 ' + (todayStatsCache.forgotCount || 0);
+    $('doneTitle').textContent = reviewed > 0 ? '今日学习记录' : '今天还没有学习';
+    const goal = parseInt(appSettings.daily_goal) || 0;
+    const pct = goal > 0 ? Math.min(100, Math.round(reviewed / goal * 100)) : (reviewed > 0 ? 100 : 0);
+    $('ringPct').textContent = pct + '%';
+    const circ = 2 * Math.PI * 42;
+    $('ringFill').setAttribute('stroke-dasharray', circ + ' ' + circ);
+    $('ringFill').setAttribute('stroke-dashoffset', circ * (1 - pct / 100));
+    $('donePanel').classList.add('show');
+    $('checkinPanel').classList.remove('show');
+    $('btnTodayReview').style.display = reviewed > 0 ? '' : 'none';
+    $('todayReviewList').style.display = 'none';
+    loadStats();
+};
+
+window.toggleTodayReview = function() {
+    const list = $('todayReviewList');
+    if (list.style.display !== 'none') {
+        list.style.display = 'none';
+        return;
+    }
+    const words = getTodayReviewWords();
+    if (words.length === 0) {
+        showToast('今天还没有复习记录');
+        return;
+    }
+    const resultLabels = { 0: '😰', 1: '🤔', 2: '😊' };
+    let known = 0, fuzzy = 0, forgot = 0;
+    let html = '';
+    for (const w of words) {
+        if (w.lastResult === 2) known++;
+        else if (w.lastResult === 1) fuzzy++;
+        else forgot++;
+        html += '<div class="tr-item"><span class="tr-korean">' + esc(w.korean) + '</span><span class="tr-meaning">' + esc(w.meaning || '') + '</span><span class="tr-result">' + (resultLabels[w.lastResult] || '') + '</span></div>';
+    }
+    $('todayReviewList').innerHTML = '<div style="padding:6px 14px;font-size:12px;color:var(--sub);display:flex;gap:14px"><span>😊 ' + known + '</span><span>🤔 ' + fuzzy + '</span><span>😰 ' + forgot + '</span></div>' + html;
+    list.style.display = 'block';
+};
 
 window.continueStudy = function() { resetDonePanels(); loadNextWord('continue'); };
 window.reviewMistakes = function() { resetDonePanels(); loadNextWord('mistakes'); };
@@ -665,6 +849,7 @@ function renderVoiceSelector() {
         container.innerHTML = '<p class="sg-desc">你的浏览器不支持语音合成</p>';
         return;
     }
+    if (cachedVoices.length === 0) cachedVoices = speechSynthesis.getVoices();
     // Re-check voices (they may have loaded since init)
     if (cachedVoices.length === 0) cachedVoices = speechSynthesis.getVoices();
     const koVoices = cachedVoices.filter(v => v.lang.startsWith('ko'));
@@ -835,8 +1020,37 @@ window.toggleBook = function(headerEl) {
     headerEl.parentElement.querySelector('.book-units').classList.toggle('collapsed');
 };
 
+// ─── Favorite Filter ───────────────────────────────────────────
+window.toggleFavFilter = function() {
+    favFilterOn = !favFilterOn;
+    const chip = $('favFilterChip');
+    if (favFilterOn) { chip.classList.add('active'); chip.textContent = '⭐ 收藏中 (' + Object.keys(lsGet('topik_favorites')).length + ')'; }
+    else { chip.classList.remove('active'); chip.textContent = '⭐ 仅看收藏'; }
+    // Re-render current view
+    const q = ($('wordsSearchInput')?.value || '').trim();
+    if (q) searchWords();
+    else if (currentBrowseUnit) openUnitDetail(currentBrowseUnit);
+    else renderUnitListView();
+};
+
 // ─── Unit List View ────────────────────────────────────────────
 function renderUnitListView() {
+    // If fav filter is on, show flat list of favorited words
+    if (favFilterOn) {
+        const favIds = Object.keys(lsGet('topik_favorites'));
+        const favWords = TOPIK_WORDS.filter(w => favIds.includes(String(w.id)));
+        $('wordsTotalCount').textContent = '收藏 ' + favWords.length + ' 词';
+        if (favWords.length === 0) {
+            $('unitListView').innerHTML = '<div class="loading-text">还没有收藏单词。在复习卡片背面点击 ☆ 即可收藏</div>';
+            return;
+        }
+        let html = '<div style="padding:0 4px"><div class="search-result-header">⭐ 已收藏 ' + favWords.length + ' 个单词</div>';
+        for (const w of favWords) html += renderWordRow(w);
+        html += '</div>';
+        $('unitListView').innerHTML = html;
+        return;
+    }
+
     const books = getAllUnitsWithProgress();
     const totalWords = TOPIK_WORDS.length;
     $('wordsTotalCount').textContent = totalWords + ' 词';
@@ -877,7 +1091,11 @@ function openUnitDetail(unitName) {
     $('unitDetailView').style.display = 'flex';
     $('quickReviewArea').style.display = 'none';
 
-    const words = TOPIK_WORDS.filter(w => w.unit === unitName);
+    let words = TOPIK_WORDS.filter(w => w.unit === unitName);
+    if (favFilterOn) {
+        const favIds = Object.keys(lsGet('topik_favorites'));
+        words = words.filter(w => favIds.includes(String(w.id)));
+    }
     const progress = getUnitProgress(unitName);
     const shortName = unitName.replace(/^(初级|中级) /, '');
 
@@ -891,7 +1109,7 @@ function openUnitDetail(unitName) {
         const hasNote = w.note && w.note.length > 0;
         html += `<div class="ud-word-row" onclick="this.classList.toggle('expanded')">
             <div class="uwr-main">
-                <div class="uwr-korean">${esc(w.korean)}</div>
+                <div class="uwr-korean">${isFavorite(w.id) ? '⭐ ' : ''}${esc(w.korean)}</div>
                 <div class="uwr-meaning">${esc(w.meaning || '')}</div>
                 <div class="uwr-meta">
                     <span class="wr-level${p.level === 0 ? ' new' : ''}">Lv${p.level}</span>
@@ -915,6 +1133,11 @@ function closeUnitDetail() {
 function startQuickReview() {
     if (!currentBrowseUnit) return;
     quickReviewWords = TOPIK_WORDS.filter(w => w.unit === currentBrowseUnit);
+    if (favFilterOn) {
+        const favIds = Object.keys(lsGet('topik_favorites'));
+        quickReviewWords = quickReviewWords.filter(w => favIds.includes(String(w.id)));
+    }
+    if (quickReviewWords.length === 0) { showToast('该单元没有可复习的单词'); return; }
     quickReviewIndex = 0;
     qrIsFlipped = false;
 
@@ -922,24 +1145,61 @@ function startQuickReview() {
     $('quickReviewArea').style.display = 'flex';
     $('unitListView').style.display = 'none';
 
-    const shortName = currentBrowseUnit.replace(/^(初级|中级) /, '');
-    $('qrTitle').textContent = shortName;
+    $('qrTitle').textContent = currentBrowseUnit;
 
     renderQuickReviewWord();
 }
 
+// ─── All-Scope Quick Review ────────────────────────────────────
+function shuffle(arr) {
+    const a = [...arr];
+    for (let i = a.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [a[i], a[j]] = [a[j], a[i]];
+    }
+    return a;
+}
+window.startAllQuickReview = function() {
+    const selectedUnits = getSelectedUnitSet();
+    let words = TOPIK_WORDS.filter(w => selectedUnits.has(w.unit));
+    if (favFilterOn) {
+        const favIds = Object.keys(lsGet('topik_favorites'));
+        words = words.filter(w => favIds.includes(String(w.id)));
+    }
+    if (words.length === 0) { showToast('学习范围内没有可复习的单词'); return; }
+    // Shuffle so units are interleaved
+    quickReviewWords = shuffle(words);
+    quickReviewIndex = 0;
+    qrIsFlipped = false;
+    currentBrowseUnit = null; // Not in a specific unit
+
+    $('unitListView').style.display = 'none';
+    $('unitDetailView').style.display = 'none';
+    $('quickReviewArea').style.display = 'flex';
+
+    const scope = (getSettings().study_scope || 'all');
+    const scopeLabel = { all: '全部单词', beginner: '初级', intermediate: '中级' };
+    $('qrTitle').textContent = (scopeLabel[scope] || '学习范围') + ' · ' + words.length + '词';
+
+    renderQuickReviewWord();
+};
+
 function exitQuickReview() {
     stopSpeech();
     $('quickReviewArea').style.display = 'none';
+    // If we came from a specific unit, go back to its detail view
     if (currentBrowseUnit) {
         $('unitDetailView').style.display = 'flex';
     } else {
+        // All-scope review or search → back to unit list
         $('unitListView').style.display = '';
+        renderUnitListView();
     }
 }
 
 function renderQuickReviewWord() {
     if (quickReviewWords.length === 0) return;
+    if (!$('qrCardInner')) return; // safety: QR card not in DOM
     const w = quickReviewWords[quickReviewIndex];
 
     $('qrCardInner').classList.remove('flipped');
@@ -966,6 +1226,7 @@ function renderQuickReviewWord() {
 
     $('qrCounter').textContent = (quickReviewIndex + 1) + ' / ' + quickReviewWords.length;
     $('qrKnownBtn').style.display = 'none';
+    updateStarButton(w.id);
 
     if (appSettings.tts_enabled !== '0' && w.korean) speak(w.korean, 'ko-KR');
 }
@@ -1067,11 +1328,15 @@ function searchWords() {
     $('quickReviewArea').style.display = 'none';
     currentBrowseUnit = null;
 
-    const results = TOPIK_WORDS.filter(w =>
+    let results = TOPIK_WORDS.filter(w =>
         w.korean.includes(q) || w.meaning.includes(q) ||
         (w.example_ko && w.example_ko.includes(q)) ||
         (w.example_zh && w.example_zh.includes(q))
     );
+    if (favFilterOn) {
+        const favIds = Object.keys(lsGet('topik_favorites'));
+        results = results.filter(w => favIds.includes(String(w.id)));
+    }
 
     if (results.length === 0) {
         $('unitListView').innerHTML = '<div class="loading-text">无匹配结果</div>';
@@ -1090,7 +1355,8 @@ function renderWordRow(w) {
     const p = getProgress(w.id);
     const hasEx = w.example_ko && w.example_ko !== 'None' && w.example_ko.length > 2;
     const m = getLocalMnemonic(w.id);
-    return `<div class="word-row" onclick="this.classList.toggle('expanded')"><div class="wr-main"><div class="wr-korean">${esc(w.korean)}</div><div class="wr-meaning">${esc(w.meaning || '')}</div><div class="wr-meta"><span class="wr-tag">${esc(w.unit || '')}</span><span class="wr-level${p.level === 0 ? ' new' : ''}">Lv${p.level}</span>${m.content ? '<span class="wr-mnemonic-dot">📝</span>' : ''}</div></div>${hasEx ? `<div class="wr-examples"><span class="ex-ko">${esc(w.example_ko)}</span><span class="ex-zh">${esc(w.example_zh)}</span></div>` : ''}</div>`;
+    const fav = isFavorite(w.id);
+    return `<div class="word-row" onclick="this.classList.toggle('expanded')"><div class="wr-main"><div class="wr-korean">${fav ? '⭐ ' : ''}${esc(w.korean)}</div><div class="wr-meaning">${esc(w.meaning || '')}</div><div class="wr-meta"><span class="wr-tag">${esc(w.unit || '')}</span><span class="wr-level${p.level === 0 ? ' new' : ''}">Lv${p.level}</span>${m.content ? '<span class="wr-mnemonic-dot">📝</span>' : ''}</div></div>${hasEx ? `<div class="wr-examples"><span class="ex-ko">${esc(w.example_ko)}</span><span class="ex-zh">${esc(w.example_zh)}</span></div>` : ''}</div>`;
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -1106,7 +1372,6 @@ function initSettingsPage() {
     $('ttsToggle').checked = s.tts_enabled !== '0';
     $('speedSlider').value = parseFloat(s.pronunciation_speed || '1.0');
     $('speedLabel').textContent = parseFloat(s.pronunciation_speed || '1.0').toFixed(1) + 'x';
-    $('gestureBallToggle').checked = s.gesture_ball !== '0';
     // Study scope toggle
     const scope = s.study_scope || 'all';
     document.querySelectorAll('#studyScopeToggle .st-btn').forEach(b => b.classList.toggle('active', b.dataset.value === scope));
@@ -1130,8 +1395,6 @@ window.toggleDarkMode = function(enabled) {
 };
 window.updateTtsSetting = function(enabled) { appSettings.tts_enabled = enabled ? '1' : '0'; saveSettings({ tts_enabled: enabled ? '1' : '0' }); };
 window.updateSpeed = function(v) { $('speedLabel').textContent = parseFloat(v).toFixed(1) + 'x'; appSettings.pronunciation_speed = v; saveSettings({ pronunciation_speed: v }); };
-window.toggleGestureBall = function(enabled) { appSettings.gesture_ball = enabled ? '1' : '0'; saveSettings({ gesture_ball: enabled ? '1' : '0' }); updateGestureBallVisibility(); };
-
 // ─── Study Scope ────────────────────────────────────────────────
 window.setStudyScope = function(scope, btn) {
     document.querySelectorAll('#studyScopeToggle .st-btn').forEach(b => b.classList.remove('active'));
@@ -1150,6 +1413,7 @@ window.exportData = function() {
         dailyStats: lsGet(LS.dailyStats),
         checkins: lsGet(LS.checkins),
         mnemonics: lsGet(LS.mnemonics),
+        favorites: lsGet(LS.favorites),
         settings: lsGet(LS.settings),
     };
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
@@ -1175,6 +1439,7 @@ window.importData = function(input) {
             if (data.dailyStats) lsSet(LS.dailyStats, data.dailyStats);
             if (data.checkins) lsSet(LS.checkins, data.checkins);
             if (data.mnemonics) lsSet(LS.mnemonics, data.mnemonics);
+            if (data.favorites) lsSet(LS.favorites, data.favorites);
             if (data.settings) lsSet(LS.settings, data.settings);
             showToast('数据已导入 ✓');
             setTimeout(() => location.reload(), 800);
@@ -1193,6 +1458,7 @@ window.resetProgress = function() {
     localStorage.removeItem(LS.dailyStats);
     localStorage.removeItem(LS.checkins);
     localStorage.removeItem(LS.mnemonics);
+    localStorage.removeItem(LS.favorites);
     showToast('进度已重置');
     location.reload();
 };
@@ -1204,47 +1470,6 @@ function applyTheme() {
     const dark = appSettings.dark_mode === '1';
     document.documentElement.setAttribute('data-theme', dark ? 'dark' : 'light');
     if ($('darkModeToggle')) $('darkModeToggle').checked = dark;
-}
-
-// ═══════════════════════════════════════════════════════════════
-// Gesture Ball
-// ═══════════════════════════════════════════════════════════════
-let gbDragging = false, gbStartX = 0, gbStartY = 0, gbOrigX = 0, gbOrigY = 0, gbMenuOpen = false;
-
-function initGestureBall() {
-    const ball = $('gestureBall'), main = ball.querySelector('.gb-main');
-    main.addEventListener('pointerdown', e => {
-        if (gbMenuOpen) { closeGbMenu(); return; }
-        gbDragging = true; gbStartX = e.clientX; gbStartY = e.clientY;
-        const rect = ball.getBoundingClientRect();
-        gbOrigX = rect.left; gbOrigY = rect.top;
-        ball.style.transition = 'none';
-        main.setPointerCapture(e.pointerId);
-    });
-    window.addEventListener('pointermove', e => {
-        if (!gbDragging) return;
-        const dx = e.clientX - gbStartX, dy = e.clientY - gbStartY;
-        ball.style.left = Math.max(8, Math.min(window.innerWidth - 60, gbOrigX + dx)) + 'px';
-        ball.style.top = Math.max(60, Math.min(window.innerHeight - 160, gbOrigY + dy)) + 'px';
-        ball.style.right = 'auto'; ball.style.bottom = 'auto';
-    });
-    window.addEventListener('pointerup', e => {
-        if (!gbDragging) return; gbDragging = false; ball.style.transition = '';
-        if (Math.abs(e.clientX - gbStartX) < 8 && Math.abs(e.clientY - gbStartY) < 8) toggleGbMenu();
-    });
-    document.addEventListener('click', e => { if (gbMenuOpen && !ball.contains(e.target)) closeGbMenu(); });
-}
-
-function toggleGbMenu() { gbMenuOpen = !gbMenuOpen; $('gbMenu').style.display = gbMenuOpen ? 'flex' : 'none'; }
-function closeGbMenu() { gbMenuOpen = false; $('gbMenu').style.display = 'none'; }
-window.gestureBallAction = function(action) {
-    closeGbMenu();
-    if (action === 'speak') { if (currentWord && currentWord.korean) speak(currentWord.korean, 'ko-KR'); }
-    else if (action === 'flip') toggleFlip();
-    else if (action === 'known') review(2);
-};
-function updateGestureBallVisibility() {
-    $('gestureBall').style.display = (appSettings.gesture_ball !== '0' && currentTab === 'review') ? 'block' : 'none';
 }
 
 // ═══════════════════════════════════════════════════════════════
