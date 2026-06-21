@@ -570,6 +570,7 @@ window.review = function(result) {
         oldStatsSnapshot,
         wasNewGraduated: isNewGraduated,
         result: result,
+        savedMode: currentMode,
     };
 
     const newP = {
@@ -597,43 +598,50 @@ window.review = function(result) {
 
 // ─── Undo ───────────────────────────────────────────────────────
 function showUndoButton() {
-    const toast = $('undoToast');
-    if (!toast) return;
+    const btn = $('cardUndoBtn');
+    if (!btn) return;
     if (undoTimer) clearTimeout(undoTimer);
-    toast.classList.add('show');
+    btn.classList.add('show');
     undoTimer = setTimeout(() => {
-        toast.classList.remove('show');
+        btn.classList.remove('show');
         lastReviewUndo = null;
     }, 3000);
 }
 window.undoReview = function() {
     if (!lastReviewUndo) return;
     const u = lastReviewUndo;
-    // Restore progress
     setProgress(u.wordId, u.oldProgress);
-    // Restore daily stats
     lsSet(LS.dailyStats, JSON.parse(u.oldStatsSnapshot));
-    // Clean up
     lastReviewUndo = null;
     if (undoTimer) clearTimeout(undoTimer);
-    $('undoToast').classList.remove('show');
-    // Reload the undone word
-    currentMode = 'normal';
+    const btn = $('cardUndoBtn'); if (btn) btn.classList.remove('show');
+    // Reload the undone word — preserve original mode
+    currentMode = u.savedMode || 'normal';
     isFlipped = false;
     loadStats();
-    // Find the word and show it
     const w = TOPIK_WORDS.find(x => x.id === u.wordId);
     if (w) {
         currentWord = w;
-        const $card = $('wordCard');
-        $card.style.display = 'block';
+        $('wordCard').style.display = 'block';
         $('cardInner').classList.remove('flipped');
         $('donePanel').classList.remove('show');
         $('reviewButtons').style.display = '';
-        // Re-render card front
+        // Re-render front
         const memMode = appSettings.memory_mode || 'ko2cn';
         $('cardMainText').textContent = memMode === 'cn2ko' ? w.meaning : w.korean;
         $('cardTag').textContent = w.unit || 'TOPIK';
+        // Re-render back (was missing — caused stale card-back bug)
+        $('backKorean').textContent = w.korean;
+        $('backMeaning').textContent = w.meaning || '（暂无释义）';
+        const exKo2 = w.example_ko, exZh2 = w.example_zh;
+        const exDiv2 = $('backExamples');
+        if (exKo2 && exKo2 !== 'None' && exKo2.length > 2) {
+            exDiv2.innerHTML = '<div class="ex-ko-row"><span class="ex-ko">' + esc(exKo2) + '</span><button class="ex-tts-btn" onclick="event.stopPropagation();speakExample()" title="朗读例句">🔊</button></div>' + (exZh2 && exZh2 !== 'None' && exZh2.length > 2 ? '<span class="ex-zh">' + esc(exZh2) + '</span>' : '');
+            exDiv2.style.display = 'block';
+        } else { exDiv2.innerHTML = ''; exDiv2.style.display = 'none'; }
+        const note2 = w.note || '';
+        if (note2 && note2.length > 0) { $('noteText').textContent = note2; $('backNote').style.display = 'flex'; }
+        else { $('backNote').style.display = 'none'; }
         cardShownAt = performance.now();
         updateStarButton(w.id);
         if (appSettings.tts_enabled !== '0' && w.korean) speak(w.korean, 'ko-KR');
@@ -646,7 +654,6 @@ function showDonePanel() {
     $('wordCard').style.display = 'none';
     $('reviewButtons').style.display = 'none';
     $('donePanel').classList.add('show');
-    $('undoToast').classList.remove('show');
     todayStatsCache = getTodayStats();
     $('doneDetail').innerHTML = '今日复习 <strong>' + (todayStatsCache.reviewedWords || 0) + '</strong> 词 · 新学 <strong>' + (todayStatsCache.newWords || 0) + '</strong> 词<br>认识 ' + (todayStatsCache.knownCount || 0) + ' · 模糊 ' + (todayStatsCache.fuzzyCount || 0) + ' · 忘记 ' + (todayStatsCache.forgotCount || 0);
     $('ringPct').textContent = '100%';
@@ -659,7 +666,7 @@ function showDonePanel() {
     $('todayReviewList').style.display = 'none';
     lastReviewUndo = null;
     if (undoTimer) clearTimeout(undoTimer);
-    $('undoToast').classList.remove('show');
+    var _ub = $('cardUndoBtn'); if (_ub) _ub.classList.remove('show');
 }
 
 function resetDonePanels() {
@@ -693,7 +700,7 @@ window.showTodayPanel = function() {
     $('reviewButtons').style.display = 'none';
     $('cardInner').classList.remove('flipped');
     isFlipped = false;
-    $('undoToast').classList.remove('show');
+    var _ub = $('cardUndoBtn'); if (_ub) _ub.classList.remove('show');
     if (undoTimer) clearTimeout(undoTimer);
     lastReviewUndo = null;
     // Show done panel with today's data

@@ -674,26 +674,17 @@ kbd {
 .wr-examples .ex-ko { display:block; color:var(--text); margin-bottom:4px; }
 .wr-examples .ex-zh { display:block; color:var(--sub); }
 
-/* ── Undo Toast ─────────────────────────────────────────────── */
-.undo-toast {
-    position:fixed; bottom:120px; left:50%; transform:translateX(-50%) translateY(24px);
-    display:flex; align-items:center; gap:14px;
-    padding:12px 22px; border-radius:28px;
-    background:var(--text); color:var(--card-bg);
-    font-size:15px; font-weight:600; z-index:1001;
-    opacity:0; pointer-events:none;
-    transition: opacity .2s, transform .2s;
-    box-shadow: 0 6px 28px rgba(0,0,0,.3);
+/* ── Card Undo Button ────────────────────────────────────────── */
+.card-undo-btn {
+    position:absolute; top:10px; left:14px; z-index:5;
+    width:32px; height:32px; border-radius:50%;
+    border:none; background:var(--primary-bg); color:var(--primary);
+    font-size:16px; cursor:pointer; font-weight:700;
+    display:none; align-items:center; justify-content:center;
+    opacity:0; transition: opacity .15s;
 }
-.undo-toast.show { opacity:1; pointer-events:auto; transform:translateX(-50%) translateY(0); }
-.undo-text { white-space:nowrap; }
-.undo-btn {
-    background:var(--primary); color:#fff; border:none;
-    padding:8px 18px; border-radius:18px;
-    font-size:14px; font-weight:700; cursor:pointer;
-    font-family:inherit; white-space:nowrap;
-}
-.undo-btn:active { transform:scale(.94); }
+.card-undo-btn.show { display:flex; opacity:1; }
+.card-undo-btn:active { transform:scale(.9); }
 
 /* ── Star Button ────────────────────────────────────────────── */
 .star-btn {

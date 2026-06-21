@@ -97,6 +97,7 @@
                 <div class="card-inner" id="cardInner">
                     <!-- 正面 -->
                     <div class="card-front">
+                        <button class="card-undo-btn" id="cardUndoBtn" onclick="event.stopPropagation();undoReview()" title="撤销">↩</button>
                         <span class="card-tag" id="cardTag">TOPIK</span>
                         <div class="card-main-text" id="cardMainText"></div>
                         <div class="card-hint">点击翻转查看释义</div>
@@ -162,12 +163,6 @@
             </button>
         </div>
         <div class="key-hints">键盘 <kbd>1</kbd><kbd>2</kbd><kbd>3</kbd> 评分 · <kbd>Space</kbd> 翻转</div>
-
-        <!-- 撤销提示 -->
-        <div class="undo-toast" id="undoToast">
-            <span class="undo-text">已评分</span>
-            <button class="undo-btn" onclick="undoReview()">↩ 撤销</button>
-        </div>
 
     </section>
 
