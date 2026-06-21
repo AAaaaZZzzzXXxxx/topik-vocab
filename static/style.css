@@ -61,7 +61,11 @@
 }
 
 /* ── Base ──────────────────────────────────────────────────── */
-html, body {
+html {
+    height:100%; overflow:hidden;
+    background: var(--bg);
+}
+body {
     height:100%; overflow:hidden;
     font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "PingFang SC", "Noto Sans KR", sans-serif;
     background: var(--bg); color: var(--text);
@@ -70,9 +74,12 @@ html, body {
     user-select: none;
     transition: background .3s ease, color .3s ease;
 }
-/* Extend background into safe areas for standalone mode */
-html { background: var(--bg); }
-body { background: var(--bg); }
+/* Cover any gap below bottom nav in standalone mode */
+body::after {
+    content:''; position:fixed; bottom:0; left:0; right:0;
+    height:env(safe-area-inset-bottom, 0px);
+    background: var(--bg); z-index:998;
+}
 
 kbd {
     display:inline-block; padding:1px 6px;
@@ -84,13 +91,12 @@ kbd {
     max-width:480px; margin:0 auto; height:100%;
     display:flex; flex-direction:column; position:relative;
     background:var(--bg);
-    padding-top:var(--safe-t);
 }
 
 /* ── Tabs ──────────────────────────────────────────────────── */
 .tab-page {
     flex:1; display:none; flex-direction:column;
-    padding-bottom: calc(var(--nav-h) + var(--safe-b) + 8px);
+    padding-bottom: calc(var(--nav-h) + var(--safe-b) + 12px);
     -webkit-overflow-scrolling: touch;
     min-height:0; /* flexbox overflow fix */
 }
@@ -104,20 +110,17 @@ kbd {
     position:fixed; bottom:0; left:50%; transform:translateX(-50%);
     width:100%; max-width:480px;
     height:calc(var(--nav-h) + var(--safe-b));
-    padding-bottom:var(--safe-b);
-    background: rgba(255,255,255,.92);
-    backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
-    border-top: .5px solid var(--border);
+    padding:0 0 calc(6px + var(--safe-b));
+    background: var(--bg);
+    border-top: 1px solid var(--border);
+    box-shadow: 0 -1px 6px rgba(0,0,0,.04);
     display:flex; align-items:center; justify-content:space-around;
     z-index:999; pointer-events:auto;
 }
-/* Fill safe area below nav with opaque body color — eliminates white bar on iPhone */
-.bottom-nav::after {
-    content:''; position:absolute; bottom:0; left:0; right:0;
-    height:var(--safe-b); background:var(--bg); z-index:-1;
+[data-theme="dark"] .bottom-nav {
+    background: var(--bg);
+    box-shadow: 0 -1px 6px rgba(0,0,0,.2);
 }
-[data-theme="dark"] .bottom-nav { background: rgba(44,44,46,.92); }
-[data-theme="dark"] .bottom-nav::after { background: var(--bg); }
 
 .bn-item {
     flex:1; display:flex; flex-direction:column; align-items:center;
@@ -331,6 +334,7 @@ kbd {
     background: rgba(242,243,247,.97);
     display:flex; align-items:center; justify-content:center;
     border-radius:var(--radius);
+    padding-top:var(--safe-t);
 }
 .guide-overlay.hidden { display:none; }
 .guide-content { text-align:center; padding:24px; max-width:300px; }
@@ -795,6 +799,7 @@ kbd {
 .ud-top-bar {
     display:flex; align-items:center; gap:10px;
     padding:4px 16px 8px;
+    padding-top:calc(4px + var(--safe-t));
 }
 .ud-back-btn {
     width:36px; height:36px; border-radius:50%;
@@ -858,6 +863,7 @@ kbd {
 .qr-top-bar {
     display:flex; align-items:center; gap:10px;
     padding:4px 16px 8px;
+    padding-top:calc(4px + var(--safe-t));
 }
 .qr-back-btn {
     width:36px; height:36px; border-radius:50%;
