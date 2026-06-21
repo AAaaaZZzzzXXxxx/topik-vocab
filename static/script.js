@@ -1391,6 +1391,9 @@ window.toggleDarkMode = function(enabled) {
     document.documentElement.setAttribute('data-theme', enabled ? 'dark' : 'light');
     appSettings.dark_mode = enabled ? '1' : '0';
     saveSettings({ dark_mode: enabled ? '1' : '0' });
+    // Sync iOS status bar / theme-color
+    const meta = document.getElementById('metaThemeColor');
+    if (meta) meta.content = enabled ? '#1c1c1e' : '#f2f3f7';
     if (currentTab === 'stats') setTimeout(loadAllCharts, 300);
 };
 window.updateTtsSetting = function(enabled) { appSettings.tts_enabled = enabled ? '1' : '0'; saveSettings({ tts_enabled: enabled ? '1' : '0' }); };
@@ -1470,6 +1473,8 @@ function applyTheme() {
     const dark = appSettings.dark_mode === '1';
     document.documentElement.setAttribute('data-theme', dark ? 'dark' : 'light');
     if ($('darkModeToggle')) $('darkModeToggle').checked = dark;
+    const meta = document.getElementById('metaThemeColor');
+    if (meta) meta.content = dark ? '#1c1c1e' : '#f2f3f7';
 }
 
 // ═══════════════════════════════════════════════════════════════

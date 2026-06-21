@@ -33,6 +33,7 @@
     --shadow-sm: 0 1px 4px rgba(0,0,0,.04);
     --nav-h: 56px;
     --safe-b: env(safe-area-inset-bottom, 0px);
+    --safe-t: env(safe-area-inset-top, 0px);
 }
 
 /* ── Theme: Dark ───────────────────────────────────────────── */
@@ -69,6 +70,9 @@ html, body {
     user-select: none;
     transition: background .3s ease, color .3s ease;
 }
+/* Extend background into safe areas for standalone mode */
+html { background: var(--bg); }
+body { background: var(--bg); }
 
 kbd {
     display:inline-block; padding:1px 6px;
@@ -80,6 +84,7 @@ kbd {
     max-width:480px; margin:0 auto; height:100%;
     display:flex; flex-direction:column; position:relative;
     background:var(--bg);
+    padding-top:var(--safe-t);
 }
 
 /* ── Tabs ──────────────────────────────────────────────────── */
@@ -106,7 +111,13 @@ kbd {
     display:flex; align-items:center; justify-content:space-around;
     z-index:999; pointer-events:auto;
 }
+/* Fill safe area below nav with opaque body color — eliminates white bar on iPhone */
+.bottom-nav::after {
+    content:''; position:absolute; bottom:0; left:0; right:0;
+    height:var(--safe-b); background:var(--bg); z-index:-1;
+}
 [data-theme="dark"] .bottom-nav { background: rgba(44,44,46,.92); }
+[data-theme="dark"] .bottom-nav::after { background: var(--bg); }
 
 .bn-item {
     flex:1; display:flex; flex-direction:column; align-items:center;
@@ -122,6 +133,7 @@ kbd {
 .review-header {
     display:flex; align-items:center; justify-content:space-between;
     padding:12px 20px 8px; gap:12px;
+    padding-top:calc(12px + var(--safe-t));
 }
 .rh-left { display:flex; flex-direction:column; gap:2px; }
 .rh-today-btn {
@@ -366,6 +378,7 @@ kbd {
 .page-header {
     display:flex; align-items:baseline; justify-content:space-between;
     padding:16px 20px 8px;
+    padding-top:calc(16px + var(--safe-t));
 }
 .page-header h2 { font-size:22px; font-weight:700; }
 .ph-sub { font-size:13px; color:var(--sub); }
