@@ -24,6 +24,29 @@ let favFilterOn = false;
 let lastReviewUndo = null;
 let undoTimer = null;
 
+// ─── Mistakes Session Tracking ─────────────────────────────────
+// Words already processed in the current mistakes review session.
+// Cleared when user exits mistakes mode (finishes or switches away).
+let mistakesReviewedToday = new Set();
+
+// ─── Short-Term Review Queue (墨墨式忘记处理) ──────────────────
+// Words forgotten today reappear after a few other words, mimicking 墨墨's
+// "间隔几个单词后再次出现". Each entry: {wordId, remainingGap}.
+// remainingGap counts down as the user reviews OTHER (non-short-term) words.
+// When remainingGap <= 0, the word gets inserted at the front of the due queue.
+const SHORT_TERM_GAP = 9; // reappear after 9 other words
+let shortTermQueue = [];   // [{wordId, remainingGap}]
+
+function addToShortTermQueue(wordId) {
+    // Replace existing entry for this word (dedup)
+    shortTermQueue = shortTermQueue.filter(e => e.wordId !== wordId);
+    shortTermQueue.push({ wordId, remainingGap: SHORT_TERM_GAP });
+}
+
+function removeFromShortTermQueue(wordId) {
+    shortTermQueue = shortTermQueue.filter(e => e.wordId !== wordId);
+}
+
 // ─── localStorage Keys ────────────────────────────────────────
 const LS = {
     progress: 'topik_progress',
@@ -83,7 +106,10 @@ function updateDailyStats(result, isNewWordGraduated) {
     const all = lsGet(LS.dailyStats);
     const today = todayISO();
     let s = all[today] || { newWords: 0, reviewedWords: 0, knownCount: 0, fuzzyCount: 0, forgotCount: 0 };
-    s.reviewedWords = (s.reviewedWords || 0) + 1;
+    // Only count successful reviews (fuzzy/known) toward "reviewedWords".
+    // "忘记" (result=0) increments forgotCount but NOT reviewedWords —
+    // a forgotten word hasn't been successfully reviewed yet.
+    if (result > 0) s.reviewedWords = (s.reviewedWords || 0) + 1;
     if (result === 2) s.knownCount = (s.knownCount || 0) + 1;
     if (result === 1) s.fuzzyCount = (s.fuzzyCount || 0) + 1;
     if (result === 0) s.forgotCount = (s.forgotCount || 0) + 1;
@@ -117,7 +143,9 @@ function getDueWords(limit = 30) {
         const p = progressCache[w.id] || { level: 0, easeFactor: 2.5, intervalDays: 0, nextReview: today, totalReviews: 0, totalCorrect: 0, lastResult: 0, lastReviewed: null, lastForgotDate: null, streakCorrect: 0 };
 
         if (currentMode === 'mistakes') {
-            if (p.lastReviewed === today && p.lastResult !== undefined && p.lastResult < 2) {
+            // Only include words that were marked wrong today AND haven't been
+            // processed yet in the current mistakes review session.
+            if (p.lastReviewed === today && p.lastResult !== undefined && p.lastResult < 2 && !mistakesReviewedToday.has(w.id)) {
                 candidates.push({ ...w, progress: p, priority: p.lastResult });
             }
             continue;
@@ -127,29 +155,56 @@ function getDueWords(limit = 30) {
         if (p.level > 0 && p.nextReview <= today) {
             candidates.push({ ...w, progress: p, priority: 0 });
         }
-        // New words
-        else if (p.level === 0 && p.nextReview <= today && p.lastReviewed !== today) {
-            candidates.push({ ...w, progress: p, priority: 1 });
+        // New words — includes words forgotten today (SM-2 resets them to level 0
+        // with nextReview=today; they should reappear so the user can re-practice).
+        // Priority 2 = forgotten-today (after genuine new words); priority 1 = genuine new.
+        else if (p.level === 0 && p.nextReview <= today && (p.lastReviewed !== today || p.lastForgotDate === today)) {
+            const isForgotToday = p.lastForgotDate === today;
+            candidates.push({ ...w, progress: p, priority: isForgotToday ? 2 : 1 });
         }
     }
 
-    // Sort: reviews first, then new words
+    // Sort: reviews first (0), then genuine new words (1), then forgotten-today re-practice (2)
     candidates.sort((a, b) => a.priority - b.priority);
 
     // Shuffle new words for interleaved unit learning
     const reviewWords = candidates.filter(c => c.priority === 0);
     let newWords = candidates.filter(c => c.priority === 1);
+    let forgotWords = candidates.filter(c => c.priority === 2);
     // Fisher-Yates shuffle on new words
     for (let i = newWords.length - 1; i > 0; i--) {
         const j = Math.floor(Math.random() * (i + 1));
         [newWords[i], newWords[j]] = [newWords[j], newWords[i]];
     }
+    // Also shuffle forgotten-today words so they interleave across units
+    for (let i = forgotWords.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [forgotWords[i], forgotWords[j]] = [forgotWords[j], forgotWords[i]];
+    }
+
+    // ── Prepend short-term review words (墨墨式"间隔几个词后重现") ──
+    // Words forgotten earlier today that are due to reappear after a few other words
+    const shortTermReady = [];
+    const remainingShortTerm = [];
+    for (const entry of shortTermQueue) {
+        if (entry.remainingGap <= 0) {
+            const sw = TOPIK_WORDS.find(w => w.id === entry.wordId);
+            if (sw) {
+                const sp = progressCache[sw.id] || { level: 0, easeFactor: 2.5, intervalDays: 0, nextReview: today, totalReviews: 0, totalCorrect: 0, lastResult: 0, lastReviewed: null, lastForgotDate: null, streakCorrect: 0 };
+                shortTermReady.push({ ...sw, progress: sp, priority: -1, isShortTerm: true });
+            }
+        } else {
+            remainingShortTerm.push(entry);
+        }
+    }
+    // Remove served entries from the queue (they're being returned now)
+    shortTermQueue = remainingShortTerm;
 
     // Apply daily goal in normal mode
     if (currentMode === 'normal' && dailyGoal > 0) {
-        const result = [];
+        const result = [...shortTermReady]; // short-term words always included, don't consume slots
         let reviewSlots = dailyGoal - todayReviewed;
-        // Reviews first (overdue)
+        // Reviews first (overdue) — don't consume slots
         for (const c of reviewWords) {
             if (result.length >= limit) break;
             result.push(c);
@@ -162,10 +217,19 @@ function getDueWords(limit = 30) {
                 reviewSlots--;
             }
         }
+        // Forgotten-today words — also consume new-word slots (they need re-practice)
+        for (const c of forgotWords) {
+            if (result.length >= limit) break;
+            if (reviewSlots > 0) {
+                result.push(c);
+                reviewSlots--;
+            }
+        }
         return result;
     }
 
-    return [...reviewWords, ...newWords].slice(0, limit);
+    // Prepend short-term words — they appear before ALL regular candidates
+    return [...shortTermReady, ...reviewWords, ...newWords, ...forgotWords].slice(0, limit);
 }
 
 function getSelectedUnitSet() {
@@ -462,6 +526,10 @@ window.switchTab = function(tab) {
 async function loadNextWord(mode) {
     if (isAnimating) return;
     isAnimating = true;
+    // Clear mistakes tracking when switching away from mistakes mode
+    if (currentMode === 'mistakes' && mode !== 'mistakes') {
+        mistakesReviewedToday = new Set();
+    }
     currentMode = mode;
 
     const queue = getDueWords(30);
@@ -537,6 +605,15 @@ async function loadNextWord(mode) {
 
     if (appSettings.tts_enabled !== '0' && w.korean) speak(w.korean, 'ko-KR');
 
+    // ── Decrement short-term queue gaps ──────────────────────
+    // Each word displayed (even short-term ones) brings other forgotten words
+    // closer to reappearing. Only skip decrementing the current word's own gap.
+    for (const entry of shortTermQueue) {
+        if (entry.wordId !== w.id) {
+            entry.remainingGap--;
+        }
+    }
+
     isAnimating = false;
 }
 
@@ -562,12 +639,39 @@ window.review = function(result) {
 
     const oldP = getProgress(currentWord.id);
     const prevLevel = oldP.level;
-    const srs = calcSRS(oldP.level, oldP.easeFactor, oldP.intervalDays, result);
-    const isNewGraduated = prevLevel === 0 && srs.level > 0;
+    const today = todayISO();
+
+    // ── Short-term queue management ──────────────────────────
+    // Remove from short-term queue on any successful review (fuzzy/known)
+    if (result > 0) {
+        removeFromShortTermQueue(currentWord.id);
+    }
+
+    // ── SM-2: distinguish first-vs-repeat forget ─────────────
+    // 墨墨 design: first forget today → full SM-2 reset.
+    // Repeated forgets today → only short-term re-queue, DON'T re-penalize long-term schedule.
+    const firstForgetToday = (result === 0 && oldP.lastForgotDate !== today);
+    let srs, isNewGraduated;
+
+    if (result === 0 && !firstForgetToday) {
+        // Non-first forget today: preserve SM-2 long-term state.
+        // Only update review metadata — the word stays at its current level/interval.
+        srs = {
+            level: oldP.level,
+            easeFactor: oldP.easeFactor,
+            intervalDays: oldP.intervalDays,
+            nextReview: oldP.nextReview,
+        };
+        isNewGraduated = false;
+    } else {
+        // First forget OR any fuzzy/known: run normal SM-2
+        srs = calcSRS(oldP.level, oldP.easeFactor, oldP.intervalDays, result);
+        isNewGraduated = prevLevel === 0 && srs.level > 0;
+    }
 
     // Save undo snapshot before mutating
-    const today = todayISO();
     const oldStatsSnapshot = JSON.stringify(lsGet(LS.dailyStats));
+    const wasInShortTermQueue = shortTermQueue.some(e => e.wordId === currentWord.id);
     lastReviewUndo = {
         wordId: currentWord.id,
         oldProgress: { ...oldP },
@@ -575,6 +679,7 @@ window.review = function(result) {
         wasNewGraduated: isNewGraduated,
         result: result,
         savedMode: currentMode,
+        wasInShortTermQueue,
     };
 
     const newP = {
@@ -590,6 +695,17 @@ window.review = function(result) {
         lastForgotDate: result === 0 ? today : oldP.lastForgotDate,
         streakCorrect: result === 2 ? (oldP.streakCorrect || 0) + 1 : 0,
     };
+
+    // Track in mistakes session so the word won't reappear in the same mistakes queue
+    if (currentMode === 'mistakes') {
+        mistakesReviewedToday.add(currentWord.id);
+    }
+
+    // ── Short-term re-queue for forgotten words ──────────────
+    if (result === 0) {
+        addToShortTermQueue(currentWord.id);
+    }
+
     setProgress(currentWord.id, newP);
     updateDailyStats(result, isNewGraduated);
 
@@ -616,6 +732,19 @@ window.undoReview = function() {
     const u = lastReviewUndo;
     setProgress(u.wordId, u.oldProgress);
     lsSet(LS.dailyStats, JSON.parse(u.oldStatsSnapshot));
+    // Remove from mistakes tracking so the word can reappear in mistakes queue
+    if (u.savedMode === 'mistakes') {
+        mistakesReviewedToday.delete(u.wordId);
+    }
+    // Restore short-term queue state: if the word was in the queue before review, re-add it;
+    // otherwise remove it (since the review may have added it for result=0)
+    if (u.wasInShortTermQueue) {
+        // Word was in short-term queue before review — re-add with gap=0 (ready immediately)
+        removeFromShortTermQueue(u.wordId);
+        shortTermQueue.push({ wordId: u.wordId, remainingGap: 0 });
+    } else {
+        removeFromShortTermQueue(u.wordId);
+    }
     lastReviewUndo = null;
     if (undoTimer) clearTimeout(undoTimer);
     const btn = $('cardUndoBtn'); if (btn) btn.classList.remove('show');
@@ -750,7 +879,17 @@ window.toggleTodayReview = function() {
 };
 
 window.continueStudy = function() { resetDonePanels(); loadNextWord('continue'); };
-window.reviewMistakes = function() { resetDonePanels(); loadNextWord('mistakes'); };
+window.reviewMistakes = function() { mistakesReviewedToday = new Set(); resetDonePanels(); loadNextWord('mistakes'); };
+
+// ─── Test helpers (exposed for integration tests) ──────────────
+window.setCurrentMode = function(m) { currentMode = m; };
+window.getCurrentMode = function() { return currentMode; };
+window.getMistakesReviewed = function() { return mistakesReviewedToday; };
+window.clearMistakesReviewed = function() { mistakesReviewedToday = new Set(); };
+window.getShortTermQueue = function() { return shortTermQueue; };
+window.clearShortTermQueue = function() { shortTermQueue = []; };
+window.addToShortTermQueue = addToShortTermQueue;
+window.removeFromShortTermQueue = removeFromShortTermQueue;
 
 window.doCheckin = function() {
     if (!doLocalCheckin()) { showToast('今日复习不足10词，无法签到'); return; }

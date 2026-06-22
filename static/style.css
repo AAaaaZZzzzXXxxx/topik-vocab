@@ -140,16 +140,17 @@ kbd {
 }
 .rh-left { display:flex; flex-direction:column; gap:2px; }
 .rh-today-btn {
-    width:40px; height:40px; border-radius:50%;
+    width:48px; height:48px; border-radius:50%;
     border:2px solid var(--border); background:var(--card-bg);
-    font-size:18px; cursor:pointer; flex-shrink:0;
+    font-size:22px; cursor:pointer; flex-shrink:0;
     display:flex; align-items:center; justify-content:center;
     transition: all .15s;
+    -webkit-tap-highlight-color: transparent;
 }
 .rh-today-btn:active { transform:scale(.92); background:var(--primary-bg); border-color:var(--primary); }
-.header-date { font-size:13px; color:var(--sub); font-weight:500; }
-.header-sub-row { display:flex; align-items:center; gap:6px; font-size:12px; color:var(--sub); }
-.hs-item strong { color:var(--text); font-size:14px; font-weight:700; }
+.header-date { font-size:15px; color:var(--sub); font-weight:500; }
+.header-sub-row { display:flex; align-items:center; gap:8px; font-size:13px; color:var(--sub); }
+.hs-item strong { color:var(--text); font-size:16px; font-weight:700; }
 .hs-sep { color:var(--hint); }
 .mode-badge {
     font-size:10px; color:#fff; background:var(--warning);
@@ -676,12 +677,13 @@ kbd {
 
 /* ── Card Undo Button ────────────────────────────────────────── */
 .card-undo-btn {
-    position:absolute; top:10px; left:14px; z-index:5;
-    width:32px; height:32px; border-radius:50%;
+    position:absolute; top:8px; left:10px; z-index:5;
+    width:44px; height:44px; border-radius:50%;
     border:none; background:var(--primary-bg); color:var(--primary);
-    font-size:16px; cursor:pointer; font-weight:700;
+    font-size:20px; cursor:pointer; font-weight:700;
     display:none; align-items:center; justify-content:center;
     opacity:0; transition: opacity .15s;
+    -webkit-tap-highlight-color: transparent;
 }
 .card-undo-btn.show { display:flex; opacity:1; }
 .card-undo-btn:active { transform:scale(.9); }
